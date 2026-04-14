@@ -1,0 +1,70 @@
+services:
+  # =========================================
+  # Ollama — Local LLM Engine
+  # =========================================
+  ollama:
+    image: docker.io/ollama/ollama:rocm
+    container_name: ollama
+    # Podman-specific: keeps your host's render/video group permissions
+    group_add:
+      - keep-groups
+    # Podman-specific: prevents SELinux/AppArmor from blocking /dev/kfd
+    security_opt:
+      - label=disable
+    # Linux-specific: find GPU
+    devices:
+      - "/dev/kfd:/dev/kfd"
+      - "/dev/dri:/dev/dri"
+    # For persist image
+    volumes:
+      - ./ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      # Optional: Force a specific ROCm version if GPU is older
+      # For RX6600
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0
+      # Free VRAM after stop model
+      - OLLAMA_KEEP_ALIVE=0
+    networks:
+      default:
+        aliases:
+          - browser
+    restart: unless-stopped
+
+  # =========================================
+  # OpenClaw — AI Agent Interface
+  # =========================================
+  openclaw:
+    image: docker.io/coollabsio/openclaw:latest
+    container_name: openclaw
+    command: ["openclaw", "gateway"]
+    depends_on:
+      - ollama
+    environment:
+      # --- API & AUTH ---
+      - AUTH_PASSWORD=test_1234      # Required for Web UI login
+      - AUTH_USERNAME=admin                     # Optional: defaults to admin
+      - OPENCLAW_GATEWAY_TOKEN=my-secret-token  # Set explicitly for stable access
+      
+      # --- NETWORKING ---
+      # IMPORTANT: This must match the URL you use in your browser
+      - OPENCLAW_ALLOWED_ORIGINS=http://localhost:18789,http://127.0.0.1:18789
+      - OLLAMA_BASE_URL=http://ollama:11434
+      
+      # --- PATHS (Matching OpenClaw's internal logic) ---
+      - OPENCLAW_STATE_DIR=/data/.openclaw
+      - OPENCLAW_WORKSPACE_DIR=/data/workspace
+      # to prevent loopback
+      - OPENCLAW_GATEWAY_BIND=lan
+    volumes:
+      # Use the /data mount point as specified in the docs
+      - ./openclaw_data:/data
+    ports:
+      - "18789:8080" # OpenClaw's Nginx listens on 8080 internally
+    networks:
+      default:
+        aliases:
+          - browser
+    restart: unless-stopped
